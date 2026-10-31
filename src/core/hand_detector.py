@@ -7,21 +7,26 @@ import numpy as np
 MODELS_DIR = Path(__file__).resolve().parents[2] / "models"
 
 DEFAULT_HAND_CASCADES = {
-    "hand": MODELS_DIR / "hand.xml",
+    "rpalm": MODELS_DIR / "rpalm.xml",
+    "lpalm": MODELS_DIR / "lpalm.xml",
+    "right": MODELS_DIR / "right.xml",
+    "left": MODELS_DIR / "left.xml",
+    "fist": MODELS_DIR / "fist.xml",
     "hand_dataset": MODELS_DIR / "Hand.Cascade.1.xml",
     "palm": MODELS_DIR / "palm.xml",
-    "fist": MODELS_DIR / "fist.xml",
 }
 DEFAULT_FACE_CASCADE = MODELS_DIR / "haarcascade_frontalface_alt.xml"
 
-# Skin range in YCrCb color space (OpenCV order: Y, Cr, Cb)
-DEFAULT_SKIN_LOWER = (0, 133, 77)
-DEFAULT_SKIN_UPPER = (255, 173, 127)
+# Skin model in YCrCb color space (OpenCV order: Y, Cr, Cb): center +- tolerance.
+# Y is the luminosity channel, Cr/Cb carry the skin chroma.
+DEFAULT_SKIN_CENTER = (128, 153, 102)
+DEFAULT_LUMA_TOLERANCE = 128  # whole luminosity range by default
+DEFAULT_CHROMA_TOLERANCE = 25
 
 
 @dataclass(frozen=True)
 class Detection:
-    """A single hand detection. `label` is the cascade that produced it (hand, palm, fist...)."""
+    """A single hand detection. `label` is the cascade that produced it (rpalm, lpalm, right, left, fist)."""
     x: int
     y: int
     w: int
@@ -44,7 +49,7 @@ class Detection:
 
 class HandDetector:
     """
-    Hand detector that combines several Haar cascades (hand, palm, fist...) and
+    Hand detector that combines several Haar cascades (rpalm, lpalm, right, left, fist) and
     refines their output with:
       - face exclusion (cascades often fire on faces),
       - skin color validation (YCrCb),
@@ -53,23 +58,68 @@ class HandDetector:
     """
 
     def __init__(self, hand_cascades=None, face_cascade=DEFAULT_FACE_CASCADE,
-                 skin_lower=DEFAULT_SKIN_LOWER, skin_upper=DEFAULT_SKIN_UPPER,
+                 skin_center=DEFAULT_SKIN_CENTER, luma_tolerance=DEFAULT_LUMA_TOLERANCE,
+                 chroma_tolerance=DEFAULT_CHROMA_TOLERANCE,
                  min_area=5000, min_skin_ratio=0.3, scale_factor=1.1, min_neighbors=4,
-                 iou_threshold=0.3, exclude_faces=True, use_skin_filter=True):
+                 iou_threshold=0.3, exclude_faces=True, use_skin_filter=True, refine_boxes=True):
         hand_cascades = DEFAULT_HAND_CASCADES if hand_cascades is None else hand_cascades
         self.hand_cascades = {name: self._load_cascade(path) for name, path in hand_cascades.items()}
         if not self.hand_cascades:
             raise ValueError("At least one hand cascade is required")
 
         self.face_cascade = self._load_cascade(face_cascade) if exclude_faces and face_cascade else None
-        self.skin_lower = np.array(skin_lower, dtype=np.uint8)
-        self.skin_upper = np.array(skin_upper, dtype=np.uint8)
+        self.skin_center = tuple(int(v) for v in skin_center)
+        self.luma_tolerance = int(luma_tolerance)
+        self.chroma_tolerance = int(chroma_tolerance)
+        self.refine_boxes = refine_boxes
+        self.last_skin_mask = None
         self.min_area = min_area
         self.min_skin_ratio = min_skin_ratio
         self.scale_factor = scale_factor
         self.min_neighbors = min_neighbors
         self.iou_threshold = iou_threshold
         self.use_skin_filter = use_skin_filter
+
+    @property
+    def skin_lower(self):
+        y, cr, cb = self.skin_center
+        return np.array([y - self.luma_tolerance, cr - self.chroma_tolerance,
+                         cb - self.chroma_tolerance]).clip(0, 255).astype(np.uint8)
+
+    @property
+    def skin_upper(self):
+        y, cr, cb = self.skin_center
+        return np.array([y + self.luma_tolerance, cr + self.chroma_tolerance,
+                         cb + self.chroma_tolerance]).clip(0, 255).astype(np.uint8)
+
+    def set_luminosity(self, center=None, tolerance=None):
+        """Adjusts the luminosity (Y) center and/or tolerance of the skin model."""
+        if center is not None:
+            self.skin_center = (int(center),) + self.skin_center[1:]
+        if tolerance is not None:
+            self.luma_tolerance = int(tolerance)
+
+    def set_chroma_tolerance(self, tolerance):
+        self.chroma_tolerance = int(tolerance)
+
+    def calibrate_skin(self, frame, point, radius=8, luma_tolerance=40):
+        """
+        Samples the skin color in a small patch around `point` (x, y) of a BGR frame and
+        recenters the skin model on it. Returns the new (Y, Cr, Cb) center.
+        """
+        h, w = frame.shape[:2]
+        x = min(max(int(point[0]), 0), w - 1)
+        y = min(max(int(point[1]), 0), h - 1)
+        patch = frame[max(y - radius, 0):y + radius + 1, max(x - radius, 0):x + radius + 1]
+        ycrcb = cv2.cvtColor(patch, cv2.COLOR_BGR2YCrCb).reshape(-1, 3)
+        self.skin_center = tuple(int(v) for v in np.median(ycrcb, axis=0))
+        self.luma_tolerance = int(luma_tolerance)
+        return self.skin_center
+
+    def reset_skin(self):
+        self.skin_center = DEFAULT_SKIN_CENTER
+        self.luma_tolerance = DEFAULT_LUMA_TOLERANCE
+        self.chroma_tolerance = DEFAULT_CHROMA_TOLERANCE
 
     @staticmethod
     def _load_cascade(path):
@@ -88,6 +138,7 @@ class HandDetector:
 
         faces = self.detect_faces(grayscale)
         skin_mask = self._skin_mask(frame, faces) if self.use_skin_filter else None
+        self.last_skin_mask = skin_mask
 
         candidates = []
         for label, cascade in self.hand_cascades.items():
@@ -97,7 +148,9 @@ class HandDetector:
             for (x, y, w, h), weight in zip(rects, np.ravel(weights)):
                 detection = Detection(int(x), int(y), int(w), int(h), label, float(weight))
                 if self._is_valid(detection, faces, skin_mask):
-                    candidates.append(detection)
+                    detection = self._refine(detection, skin_mask)
+                    if detection is not None:
+                        candidates.append(detection)
 
         return self._non_max_suppression(candidates)
 
@@ -114,6 +167,20 @@ class HandDetector:
         for (fx, fy, fw, fh) in faces:  # the face is skin too, it must not validate hands
             mask[fy:fy + fh, fx:fx + fw] = 0
         return mask
+
+    def _refine(self, detection, skin_mask):
+        """Tightens the Haar box around the largest skin blob inside it (Haar boxes are loose)."""
+        if not self.refine_boxes or skin_mask is None:
+            return detection
+        x0, y0 = detection.x, detection.y
+        roi = skin_mask[y0:y0 + detection.h, x0:x0 + detection.w]
+        contours, _ = cv2.findContours(roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+        x, y, w, h = cv2.boundingRect(max(contours, key=cv2.contourArea))
+        if w * h < self.min_area * 0.25:
+            return None
+        return Detection(x0 + x, y0 + y, w, h, detection.label, detection.score)
 
     def _is_valid(self, detection, faces, skin_mask):
         if detection.area < self.min_area:
