@@ -4,6 +4,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from .contour_analyzer import ContourAnalyzer  # [NUEVO]
+
 MODELS_DIR = Path(__file__).resolve().parents[2] / "models"
 
 DEFAULT_HAND_CASCADES = {
@@ -17,16 +19,14 @@ DEFAULT_HAND_CASCADES = {
 }
 DEFAULT_FACE_CASCADE = MODELS_DIR / "haarcascade_frontalface_alt.xml"
 
-# Skin model in YCrCb color space (OpenCV order: Y, Cr, Cb): center +- tolerance.
-# Y is the luminosity channel, Cr/Cb carry the skin chroma.
+# Modelo de piel en YCrCb (orden OpenCV: Y, Cr, Cb): centro ± tolerancia.
 DEFAULT_SKIN_CENTER = (128, 153, 102)
-DEFAULT_LUMA_TOLERANCE = 128  # whole luminosity range by default
+DEFAULT_LUMA_TOLERANCE = 128
 DEFAULT_CHROMA_TOLERANCE = 25
 
 
 @dataclass(frozen=True)
 class Detection:
-    """A single hand detection. `label` is the cascade that produced it (rpalm, lpalm, right, left, fist)."""
     x: int
     y: int
     w: int
@@ -48,20 +48,13 @@ class Detection:
 
 
 class HandDetector:
-    """
-    Hand detector that combines several Haar cascades (rpalm, lpalm, right, left, fist) and
-    refines their output with:
-      - face exclusion (cascades often fire on faces),
-      - skin color validation (YCrCb),
-      - minimum area filtering,
-      - non-maximum suppression across all cascades.
-    """
-
     def __init__(self, hand_cascades=None, face_cascade=DEFAULT_FACE_CASCADE,
                  skin_center=DEFAULT_SKIN_CENTER, luma_tolerance=DEFAULT_LUMA_TOLERANCE,
                  chroma_tolerance=DEFAULT_CHROMA_TOLERANCE,
                  min_area=5000, min_skin_ratio=0.3, scale_factor=1.1, min_neighbors=4,
-                 iou_threshold=0.3, exclude_faces=True, use_skin_filter=True, refine_boxes=True):
+                 iou_threshold=0.3, exclude_faces=True, use_skin_filter=True,
+                 refine_boxes=True,
+                 analyze_contours=True):                      # [NUEVO]
         hand_cascades = DEFAULT_HAND_CASCADES if hand_cascades is None else hand_cascades
         self.hand_cascades = {name: self._load_cascade(path) for name, path in hand_cascades.items()}
         if not self.hand_cascades:
@@ -80,6 +73,12 @@ class HandDetector:
         self.iou_threshold = iou_threshold
         self.use_skin_filter = use_skin_filter
 
+        # [NUEVO] analizador de contornos + caché de resultados
+        self.analyze_contours = analyze_contours
+        self.contour_analyzer = ContourAnalyzer() if analyze_contours else None
+        self.last_contours = {}   # dict: box_tuple -> HandContour
+
+    # --------------------------------------------------------------- skin
     @property
     def skin_lower(self):
         y, cr, cb = self.skin_center
@@ -93,7 +92,6 @@ class HandDetector:
                          cb + self.chroma_tolerance]).clip(0, 255).astype(np.uint8)
 
     def set_luminosity(self, center=None, tolerance=None):
-        """Adjusts the luminosity (Y) center and/or tolerance of the skin model."""
         if center is not None:
             self.skin_center = (int(center),) + self.skin_center[1:]
         if tolerance is not None:
@@ -103,10 +101,6 @@ class HandDetector:
         self.chroma_tolerance = int(tolerance)
 
     def calibrate_skin(self, frame, point, radius=8, luma_tolerance=40):
-        """
-        Samples the skin color in a small patch around `point` (x, y) of a BGR frame and
-        recenters the skin model on it. Returns the new (Y, Cr, Cb) center.
-        """
         h, w = frame.shape[:2]
         x = min(max(int(point[0]), 0), w - 1)
         y = min(max(int(point[1]), 0), h - 1)
@@ -121,6 +115,7 @@ class HandDetector:
         self.luma_tolerance = DEFAULT_LUMA_TOLERANCE
         self.chroma_tolerance = DEFAULT_CHROMA_TOLERANCE
 
+    # ---------------------------------------------------------- utilidades
     @staticmethod
     def _load_cascade(path):
         path = Path(path)
@@ -131,8 +126,8 @@ class HandDetector:
             raise ValueError(f"Could not load cascade: {path}")
         return cascade
 
+    # ---------------------------------------------------------- detección
     def detect(self, frame):
-        """Returns a list of `Detection` for the given BGR frame."""
         grayscale = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         grayscale = cv2.equalizeHist(grayscale)
 
@@ -152,24 +147,42 @@ class HandDetector:
                     if detection is not None:
                         candidates.append(detection)
 
-        return self._non_max_suppression(candidates)
+        kept = self._non_max_suppression(candidates)
+
+        # [NUEVO] análisis de contorno sobre las detecciones que sobreviven al NMS
+        self.last_contours = {}
+        if self.contour_analyzer is not None and self.last_skin_mask is not None:
+            for det in kept:
+                hc = self.contour_analyzer.analyze(frame, det, self.last_skin_mask)
+                if hc is not None:
+                    self.last_contours[det.box] = hc
+
+        return kept
+
+    # [NUEVO]
+    def draw_contours(self, frame, color=(255, 0, 255)):
+        if self.contour_analyzer is None:
+            return frame
+        for hc in self.last_contours.values():
+            self.contour_analyzer.draw(frame, hc, color)
+        return frame
 
     def detect_faces(self, grayscale):
         if self.face_cascade is None:
             return []
-        return [tuple(int(v) for v in f) for f in self.face_cascade.detectMultiScale(grayscale, 1.1, 5)]
+        return [tuple(int(v) for v in f)
+                for f in self.face_cascade.detectMultiScale(grayscale, 1.1, 5)]
 
     def _skin_mask(self, frame, faces):
         ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
         mask = cv2.inRange(ycrcb, self.skin_lower, self.skin_upper)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-        for (fx, fy, fw, fh) in faces:  # the face is skin too, it must not validate hands
+        for (fx, fy, fw, fh) in faces:
             mask[fy:fy + fh, fx:fx + fw] = 0
         return mask
 
     def _refine(self, detection, skin_mask):
-        """Tightens the Haar box around the largest skin blob inside it (Haar boxes are loose)."""
         if not self.refine_boxes or skin_mask is None:
             return detection
         x0, y0 = detection.x, detection.y
@@ -189,7 +202,8 @@ class HandDetector:
             if self._overlap_over_smaller(detection.box, face) > 0.5:
                 return False
         if skin_mask is not None:
-            roi = skin_mask[detection.y:detection.y + detection.h, detection.x:detection.x + detection.w]
+            roi = skin_mask[detection.y:detection.y + detection.h,
+                            detection.x:detection.x + detection.w]
             if roi.size == 0 or cv2.countNonZero(roi) / roi.size < self.min_skin_ratio:
                 return False
         return True
@@ -219,7 +233,8 @@ class HandDetector:
     @staticmethod
     def draw(frame, detections, color=(0, 255, 0)):
         for det in detections:
-            cv2.rectangle(frame, (det.x, det.y), (det.x + det.w, det.y + det.h), color, 2)
+            cv2.rectangle(frame, (det.x, det.y),
+                          (det.x + det.w, det.y + det.h), color, 2)
             cv2.putText(frame, det.label, (det.x, max(det.y - 8, 12)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
         return frame
