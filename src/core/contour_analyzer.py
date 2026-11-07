@@ -41,7 +41,8 @@ class ContourAnalyzer:
                  min_area: int = 2500,
                  defect_depth_ratio: float = 0.10,
                  defect_angle_max: float = 90.0,
-                 min_solidity: float = 0.55):
+                 min_solidity: float = 0.55,
+                 roi_padding: float = 0.25):
         """
         min_area:            área mínima del contorno para considerarlo mano.
         defect_depth_ratio:  profundidad mínima de un defecto, relativa al lado mayor
@@ -55,6 +56,7 @@ class ContourAnalyzer:
         self.defect_depth_ratio = defect_depth_ratio
         self.defect_angle_max = defect_angle_max
         self.min_solidity = min_solidity
+        self.roi_padding = roi_padding
 
     # ------------------------------------------------------------------ API
     def analyze(self,
@@ -65,8 +67,16 @@ class ContourAnalyzer:
         if skin_mask is None:
             return None
 
-        x0, y0, w0, h0 = detection.box
-        roi = skin_mask[y0:y0 + h0, x0:x0 + w0]
+        bx0, by0, w0, h0 = detection.box
+        # Margen extra para no recortar dedos (p. ej. el pulgar) que sobresalen de la caja.
+        mh, mw = skin_mask.shape[:2]
+        pad_x = int(w0 * self.roi_padding)
+        pad_y = int(h0 * self.roi_padding)
+        x0 = max(bx0 - pad_x, 0)
+        y0 = max(by0 - pad_y, 0)
+        x1 = min(bx0 + w0 + pad_x, mw)
+        y1 = min(by0 + h0 + pad_y, mh)
+        roi = skin_mask[y0:y1, x0:x1]
         if roi.size == 0:
             return None
 
@@ -100,14 +110,14 @@ class ContourAnalyzer:
         valid_defects: List[Defect] = []
         defects_raw = cv2.convexityDefects(contour, hull_indices)
         if defects_raw is not None:
-            for i in range(defects_raw.shape[0]):
-                s, e, f, d = defects_raw[i, 0]
+            # Según la versión de OpenCV la forma es (N, 1, 4) o (N, 4).
+            for s, e, f, d in defects_raw.reshape(-1, 4):
                 depth = float(d) / 256.0
                 if depth < depth_threshold:
                     continue
-                start = tuple(int(v) for v in contour[s][0])
-                end = tuple(int(v) for v in contour[e][0])
-                far = tuple(int(v) for v in contour[f][0])
+                start = tuple(int(v) for v in contour[int(s)].reshape(-1)[:2])
+                end = tuple(int(v) for v in contour[int(e)].reshape(-1)[:2])
+                far = tuple(int(v) for v in contour[int(f)].reshape(-1)[:2])
                 angle = self._angle(start, far, end)
                 if angle > self.defect_angle_max:
                     continue

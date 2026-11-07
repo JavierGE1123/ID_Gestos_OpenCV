@@ -53,7 +53,7 @@ class HandDetector:
                  chroma_tolerance=DEFAULT_CHROMA_TOLERANCE,
                  min_area=5000, min_skin_ratio=0.3, scale_factor=1.1, min_neighbors=4,
                  iou_threshold=0.3, exclude_faces=True, use_skin_filter=True,
-                 refine_boxes=True,
+                 refine_boxes=True, box_padding=0.4,
                  analyze_contours=True):                      # [NUEVO]
         hand_cascades = DEFAULT_HAND_CASCADES if hand_cascades is None else hand_cascades
         self.hand_cascades = {name: self._load_cascade(path) for name, path in hand_cascades.items()}
@@ -65,6 +65,9 @@ class HandDetector:
         self.luma_tolerance = int(luma_tolerance)
         self.chroma_tolerance = int(chroma_tolerance)
         self.refine_boxes = refine_boxes
+        # Los Haar de palma suelen dejar fuera el pulgar: se busca el contorno de piel
+        # en una región ampliada (fracción del tamaño de la caja por cada lado).
+        self.box_padding = box_padding
         self.last_skin_mask = None
         self.min_area = min_area
         self.min_skin_ratio = min_skin_ratio
@@ -185,8 +188,16 @@ class HandDetector:
     def _refine(self, detection, skin_mask):
         if not self.refine_boxes or skin_mask is None:
             return detection
-        x0, y0 = detection.x, detection.y
-        roi = skin_mask[y0:y0 + detection.h, x0:x0 + detection.w]
+        mh, mw = skin_mask.shape[:2]
+        pad_x = int(detection.w * self.box_padding)
+        pad_y = int(detection.h * self.box_padding)
+        x0 = max(detection.x - pad_x, 0)
+        y0 = max(detection.y - pad_y, 0)
+        x1 = min(detection.x + detection.w + pad_x, mw)
+        y1 = min(detection.y + detection.h + pad_y, mh)
+        roi = skin_mask[y0:y1, x0:x1]
+        if roi.size == 0:
+            return None
         contours, _ = cv2.findContours(roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return None
@@ -235,6 +246,6 @@ class HandDetector:
         for det in detections:
             cv2.rectangle(frame, (det.x, det.y),
                           (det.x + det.w, det.y + det.h), color, 2)
-            cv2.putText(frame, det.label, (det.x, max(det.y - 8, 12)),
+            cv2.putText(frame, det.label, (det.x, max(det.y - 18, 12)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
         return frame
