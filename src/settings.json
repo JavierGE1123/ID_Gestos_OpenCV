@@ -1,0 +1,18 @@
+{
+  "quit": {
+    "key": "q",
+    "help": "quit"
+  },
+  "toggle_mask": {
+    "key": "m",
+    "help": "mask"
+  },
+  "reset_skin": {
+    "key": "r",
+    "help": "reset"
+  },
+  "toggle_contours": {
+    "key": "c",
+    "help": "contours"
+  }
+}

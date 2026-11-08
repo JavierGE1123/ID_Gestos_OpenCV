@@ -2,6 +2,7 @@ import cv2
 
 from core import webcam_controller as CAM
 from core.hand_detector import HandDetector
+from src.config import HELP_TEXT, KEYS
 
 WINDOW = 'Webcam'
 MASK_WINDOW = 'Skin mask'
@@ -45,10 +46,10 @@ class SkinTuner:
         self._updating = False
 
     def handle_key(self, key):
-        if key == ord('r'):
+        if key == KEYS.reset_skin.key:
             self.detector.reset_skin()
             self._sync_trackbars()
-        elif key == ord('m'):
+        elif key == KEYS.toggle_mask.key:
             self.show_mask = not self.show_mask
             if not self.show_mask:
                 cv2.destroyWindow(MASK_WINDOW)
@@ -58,7 +59,7 @@ class SkinTuner:
             cv2.imshow(MASK_WINDOW, self.detector.last_skin_mask)
         # [MODIFICADO] ayuda incluye la nueva tecla 'c'
         cv2.putText(frame,
-                    "Click on your hand to calibrate skin | m: mask | c: contours | r: reset | q: quit",
+                    f"Click en tu mano para calibrar tono de piel | {HELP_TEXT}",
                     (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         cv2.imshow(WINDOW, frame)
 
@@ -84,9 +85,9 @@ def main():
 
         tuner.show(frame)
         key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
+        if key == KEYS.quit.key:
             break
-        if key == ord('c'):                   #toggle contornos
+        if key == KEYS.toggle_contours.key:                   #toggle contornos
             show_contours = not show_contours
             continue
         tuner.handle_key(key)
