@@ -98,7 +98,7 @@ def main():
 
         # [NUEVO] overlay de estado (se dibuja DESPUÉS del filtro -> en color)
         if filter_manager.armed:
-            cv2.putText(frame, "ESPERANDO: Enseña dedos para activar filtros",
+            cv2.putText(frame, "ESPERANDO: Muestra dedos para activar filtros",
                         (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
         elif filter_manager.is_active:
             cv2.putText(frame, f"ACTIVAR FILTRO: {filter_manager.active_filter}",
