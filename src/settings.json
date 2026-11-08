@@ -1,4 +1,6 @@
 {
+  "_version": 1,
+  "_comment": "Edita 'key' con la tecla que quieras. Debe ser un único carácter.",
   "quit": {
     "key": "q",
     "help": "quit"
