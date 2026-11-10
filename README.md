@@ -74,12 +74,14 @@ El flujo se ejecuta fotograma a fotograma en `src/main.py`:
 ## Estructura del proyecto
 
 ```
-models/                      Clasificadores Haar (manos y cara)
-src/main.py                  Bucle principal, ventanas, deslizadores y teclas
-src/core/webcam_controller.py  Captura de la webcam
-src/core/hand_detector.py    Detección de manos y máscara de piel
-src/core/contour_analyzer.py Análisis de contorno, dedos y gesto
-src/core/filter.py           Añade filtros según el número de dedos detectados
+models/                         Clasificadores Haar (manos y cara)
+src/main.py                     Bucle principal, ventanas, deslizadores y teclas
+src/core/webcam_controller.py   Captura de la webcam
+src/core/hand_detector.py       Detección de manos y máscara de piel
+src/core/contour_analyzer.py    Análisis de contorno, dedos y gesto
+src/core/filter.py              Añade filtros según el número de dedos detectados
+src/config.py                   Carga/validación de settings.json y atajos de teclado
+src/settings.json               Configuración editable por el usuario (se autogenera)
 ```
 
 ## Requisitos y ejecución
@@ -97,6 +99,27 @@ src/core/filter.py           Añade filtros según el número de dedos detectado
   cd src
   python main.py
   ```
+## Configuración de teclas (`settings.json`)
+
+Las teclas de acción se leen desde `src/settings.json`. **La primera vez que se ejecuta el programa, el archivo se genera automáticamente** con los valores por defecto, de modo que el usuario puede reasignar teclas sin tocar el código Python.
+
+Formato del archivo:
+
+```json
+{
+"_version": 1,
+"_comment": "Edita 'key' con la tecla que quieras. Debe ser un único carácter.",
+"quit":            { "key": "q", "help": "quit" },
+"toggle_mask":     { "key": "m", "help": "mask" },
+"reset_skin":      { "key": "r", "help": "reset" },
+"toggle_contours": { "key": "c", "help": "contours" }
+}
+```
+
+- `key`: tecla asignada. Debe ser un único carácter.
+- `help`: texto que aparece en la barra de ayuda del HUD. Se regenera automáticamente a partir de este archivo.
+- `_version`: reservado para futuras migraciones de formato.
+- `_comment`: nota informativa para el usuario (JSON no admite comentarios nativos).
 
 ## Cómo usar el programa
 
@@ -105,7 +128,7 @@ src/core/filter.py           Añade filtros según el número de dedos detectado
 - **Webcam**: imagen de la cámara con las detecciones, los contornos y los deslizadores.
 - **Skin mask**: máscara binaria de piel (se muestra/oculta con la tecla `m`).
 
-### Teclas
+### Teclas (por defecto)
 
 | Tecla | Acción |
 |---|---|
@@ -115,6 +138,8 @@ src/core/filter.py           Añade filtros según el número de dedos detectado
 | `w` | Activar detección de filtros pedidos. |
 | `e` | Limpiar filtros actuales. |
 | `r` | Restablecer los valores de piel por defecto (y los deslizadores). |
+
+    El texto de ayuda que aparece en la ventana se genera automáticamente a partir de settings.json, por lo que siempre refleja las teclas activas.
 
 ### Ratón
 

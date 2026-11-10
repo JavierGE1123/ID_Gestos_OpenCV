@@ -1,0 +1,28 @@
+{
+  "_version": 1,
+  "_comment": "Edita 'key' con la tecla que quieras. Debe ser un único carácter.",
+  "quit": {
+    "key": "q",
+    "help": "quit"
+  },
+  "toggle_mask": {
+    "key": "m",
+    "help": "mask"
+  },
+  "reset_skin": {
+    "key": "r",
+    "help": "reset sliders"
+  },
+  "toggle_contours": {
+    "key": "c",
+    "help": "contours"
+  },
+  "toggle_filter": {
+    "key": "w",
+    "help": "gesture filter"
+  },
+  "reset_filter": {
+    "key": "e",
+    "help": "clear filter"
+  }
+}
