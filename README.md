@@ -9,6 +9,7 @@ Se hace uso de clasificadores en cascada (Haar cascades), segmentación de piel 
 - Segmentar la piel en el espacio de color YCrCb y ajustar la segmentación a las condiciones de luz y al tono de piel del usuario.
 - Analizar la geometría del contorno de la mano (envolvente convexa y defectos de convexidad) para estimar el número de dedos extendidos.
 - Clasificar gestos estáticos sencillos: puño cerrado (`fist`), mano abierta (`open`), gesto parcial (`partial`, p. ej. victoria o señalar) o desconocido (`unknown`).
+- Aplicar **filtros de imagen** sobre el vídeo a partir del número de dedos detectados (blanco y negro, Canny, desenfoque gaussiano) mediante una interacción explícita del usuario (tecla `w`).
 
 ## Cómo funciona
 
@@ -31,7 +32,13 @@ El flujo se ejecuta fotograma a fotograma en `src/main.py`:
      - 3 o más valles → `open` (valles + 1 dedos, máximo 5).
      - 1 o 2 valles → `partial` (valles + 1 dedos).
      - En otro caso → `unknown`.
-9. **Visualización**: se dibujan la caja de la detección (verde), el contorno (magenta), la envolvente (naranja), los defectos (círculos rojos) y la etiqueta `gesto | dedos | solidez`.
+9. **Filtros por gestos** (`FilterManager`, en `src/core/filters.py`):
+   - El usuario arma el modo de espera pulsando `w` (banner amarillo `WAITING`).
+   - En cada fotograma, si el modo está armado, se consulta `detector.last_contours` y se busca una mano cuyo `finger_count` esté en `SUPPORTED_FINGERS`.
+   - Si se encuentra, se activa el filtro correspondiente y el modo se desarma (banner verde `ACTIVE FILTER`).
+   - El filtro se aplica al fotograma **después** de la detección y el dibujo de cajas/contornos (el detector necesita la imagen en color) pero **antes** de dibujar la ayuda y los banners, de modo que el texto queda en color sobre el efecto.
+   - `r` desactiva el filtro (y sigue reseteando el modelo de piel); `w` vuelve a armar el modo desde cero.
+10. **Visualización**: se dibujan la caja de la detección (verde), el contorno (magenta), la envolvente (naranja), los defectos (círculos rojos) y la etiqueta `gesto | dedos | solidez`.
 
 ## Funciones de OpenCV utilizadas
 
@@ -58,17 +65,23 @@ El flujo se ejecuta fotograma a fotograma en `src/main.py`:
 | `cv2.namedWindow` | Creación de la ventana principal. |
 | `cv2.createTrackbar` / `cv2.setTrackbarPos` | Deslizadores de ajuste de la segmentación de piel. |
 | `cv2.setMouseCallback` | Calibración de la piel con clic del ratón. |
+| `cv2.cvtColor(BGR → GRAY)` + `cv2.cvtColor(GRAY → BGR)` | Aplica filtro blanco y negro. |
+| `cv2.Canny` | Aplica filtro canny para resaltar esquinas. |
+| `cv2.GaussianBlur` | Aplica filtro gaussiano para suavizar. |
 | `cv2.imshow` / `cv2.destroyWindow` / `cv2.destroyAllWindows` | Mostrar y cerrar ventanas. |
 | `cv2.waitKey` | Lectura del teclado. |
 
 ## Estructura del proyecto
 
 ```
-models/                      Clasificadores Haar (manos y cara)
-src/main.py                  Bucle principal, ventanas, deslizadores y teclas
-src/core/webcam_controller.py  Captura de la webcam
-src/core/hand_detector.py    Detección de manos y máscara de piel
-src/core/contour_analyzer.py Análisis de contorno, dedos y gesto
+models/                         Clasificadores Haar (manos y cara)
+src/main.py                     Bucle principal, ventanas, deslizadores y teclas
+src/core/webcam_controller.py   Captura de la webcam
+src/core/hand_detector.py       Detección de manos y máscara de piel
+src/core/contour_analyzer.py    Análisis de contorno, dedos y gesto
+src/core/filter.py              Añade filtros según el número de dedos detectados
+src/config.py                   Carga/validación de settings.json y atajos de teclado
+src/settings.json               Configuración editable por el usuario (se autogenera)
 ```
 
 ## Requisitos y ejecución
@@ -86,6 +99,27 @@ src/core/contour_analyzer.py Análisis de contorno, dedos y gesto
   cd src
   python main.py
   ```
+## Configuración de teclas (`settings.json`)
+
+Las teclas de acción se leen desde `src/settings.json`. **La primera vez que se ejecuta el programa, el archivo se genera automáticamente** con los valores por defecto, de modo que el usuario puede reasignar teclas sin tocar el código Python.
+
+Formato del archivo:
+
+```json
+{
+"_version": 1,
+"_comment": "Edita 'key' con la tecla que quieras. Debe ser un único carácter.",
+"quit":            { "key": "q", "help": "quit" },
+"toggle_mask":     { "key": "m", "help": "mask" },
+"reset_skin":      { "key": "r", "help": "reset" },
+"toggle_contours": { "key": "c", "help": "contours" }
+}
+```
+
+- `key`: tecla asignada. Debe ser un único carácter.
+- `help`: texto que aparece en la barra de ayuda del HUD. Se regenera automáticamente a partir de este archivo.
+- `_version`: reservado para futuras migraciones de formato.
+- `_comment`: nota informativa para el usuario (JSON no admite comentarios nativos).
 
 ## Cómo usar el programa
 
@@ -94,14 +128,18 @@ src/core/contour_analyzer.py Análisis de contorno, dedos y gesto
 - **Webcam**: imagen de la cámara con las detecciones, los contornos y los deslizadores.
 - **Skin mask**: máscara binaria de piel (se muestra/oculta con la tecla `m`).
 
-### Teclas
+### Teclas (por defecto)
 
 | Tecla | Acción |
 |---|---|
 | `q` | Salir del programa. |
 | `m` | Mostrar / ocultar la ventana de la máscara de piel. |
 | `c` | Activar / desactivar el dibujo de contornos, envolvente y defectos. |
+| `w` | Activar detección de filtros pedidos. |
+| `e` | Limpiar filtros actuales. |
 | `r` | Restablecer los valores de piel por defecto (y los deslizadores). |
+
+    El texto de ayuda que aparece en la ventana se genera automáticamente a partir de settings.json, por lo que siempre refleja las teclas activas.
 
 ### Ratón
 

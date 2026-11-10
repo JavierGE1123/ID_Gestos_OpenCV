@@ -3,6 +3,7 @@ import cv2
 from core import webcam_controller as CAM
 from core.hand_detector import HandDetector
 from core.filter import FilterManager
+from src.config import HELP_TEXT, KEYS
 
 WINDOW = 'Webcam'
 MASK_WINDOW = 'Skin mask'
@@ -53,10 +54,10 @@ class SkinTuner:
         self._updating = False
 
     def handle_key(self, key):
-        if key == ord('r'):
+        if key == KEYS.reset_skin.key:
             self.detector.reset_skin()
             self._sync_trackbars()
-        elif key == ord('m'):
+        elif key == KEYS.toggle_mask.key:
             self.show_mask = not self.show_mask
             if not self.show_mask:
                 cv2.destroyWindow(MASK_WINDOW)
@@ -66,7 +67,7 @@ class SkinTuner:
             cv2.imshow(MASK_WINDOW, self.detector.last_skin_mask)
         # [MODIFICADO] ayuda incluye la nueva tecla 'w'
         cv2.putText(frame,
-                    "Click calibrate | m: mask | c: contours | w: gesture filter | r: reset | e: clear | q: quit",
+                    f"Click en tu mano para calibrar tono de piel | {HELP_TEXT}",
                     (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         cv2.imshow(WINDOW, frame)
 
@@ -98,7 +99,7 @@ def main():
 
         # [NUEVO] overlay de estado (se dibuja DESPUÉS del filtro -> en color)
         if filter_manager.armed:
-            cv2.putText(frame, "ESPERANDO: Enseña dedos para activar filtros",
+            cv2.putText(frame, "ESPERANDO: Muestra dedos para activar filtros",
                         (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
         elif filter_manager.is_active:
             cv2.putText(frame, f"ACTIVAR FILTRO: {filter_manager.active_filter}",
@@ -107,13 +108,13 @@ def main():
         tuner.show(frame)
 
         key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
+        if key == KEYS.quit.key:
             break
-        elif key == ord('w'):                        # [NUEVO] armar filtro
+        elif key == KEYS.toggle_filter.key:                        # [NUEVO] armar filtro
             filter_manager.arm()
-        elif key == ord('c'):
+        elif key == KEYS.toggle_contours.key:
             show_contours = not show_contours
-        elif key == ord('e'):
+        elif key == KEYS.clear_filter:
             filter_manager.clear()
         else:
             tuner.handle_key(key)                    # 'r' resetea piel, 'm' máscara
