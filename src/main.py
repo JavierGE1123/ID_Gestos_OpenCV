@@ -2,6 +2,7 @@ import cv2
 
 from core import webcam_controller as CAM
 from core.hand_detector import HandDetector
+from core.filter import FilterManager
 from src.config import HELP_TEXT, KEYS
 
 WINDOW = 'Webcam'
@@ -9,6 +10,13 @@ MASK_WINDOW = 'Skin mask'
 
 
 class SkinTuner:
+    """
+    Real-time skin tone adjustment:
+      - left click on the hand to sample its skin tone,
+      - sliders to fine-tune luminosity (center and range) and chroma tolerance,
+      - 'r' resets the skin model, 'm' toggles the skin mask view, 'q' quits.
+    """
+
     def __init__(self, detector):
         self.detector = detector
         self.last_frame = None
@@ -57,7 +65,7 @@ class SkinTuner:
     def show(self, frame):
         if self.show_mask and self.detector.last_skin_mask is not None:
             cv2.imshow(MASK_WINDOW, self.detector.last_skin_mask)
-        # [MODIFICADO] ayuda incluye la nueva tecla 'c'
+        # [MODIFICADO] ayuda incluye la nueva tecla 'w'
         cv2.putText(frame,
                     f"Click en tu mano para calibrar tono de piel | {HELP_TEXT}",
                     (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
@@ -68,8 +76,9 @@ def main():
     video = CAM.WebcamController()
     detector = HandDetector()
     tuner = SkinTuner(detector)
+    filter_manager = FilterManager()                 # [NUEVO]
 
-    show_contours = True   #flag para la tecla 'c'
+    show_contours = True
 
     while True:
         ret, frame = video.get_frame()
@@ -83,14 +92,32 @@ def main():
         if show_contours:
             detector.draw_contours(frame)
 
+        # [NUEVO] 1) comprueba si hay que activar filtro (solo si armado)
+        #        2) aplica el filtro activo al frame de visualización
+        filter_manager.update(detector)
+        filter_manager.apply(frame)
+
+        # [NUEVO] overlay de estado (se dibuja DESPUÉS del filtro -> en color)
+        if filter_manager.armed:
+            cv2.putText(frame, "ESPERANDO: Muestra dedos para activar filtros",
+                        (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        elif filter_manager.is_active:
+            cv2.putText(frame, f"ACTIVAR FILTRO: {filter_manager.active_filter}",
+                        (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
         tuner.show(frame)
+
         key = cv2.waitKey(1) & 0xFF
         if key == KEYS.quit.key:
             break
-        if key == KEYS.toggle_contours.key:                   #toggle contornos
+        elif key == KEYS.toggle_filter.key:                        # [NUEVO] armar filtro
+            filter_manager.arm()
+        elif key == KEYS.toggle_contours.key:
             show_contours = not show_contours
-            continue
-        tuner.handle_key(key)
+        elif key == KEYS.clear_filter:
+            filter_manager.clear()
+        else:
+            tuner.handle_key(key)                    # 'r' resetea piel, 'm' máscara
 
     video.release()
     cv2.destroyAllWindows()
