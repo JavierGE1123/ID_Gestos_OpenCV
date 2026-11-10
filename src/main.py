@@ -54,10 +54,10 @@ class SkinTuner:
         self._updating = False
 
     def handle_key(self, key):
-        if key == KEYS.reset_skin.key:
+        if key == ord(KEYS.reset_skin.key):
             self.detector.reset_skin()
             self._sync_trackbars()
-        elif key == KEYS.toggle_mask.key:
+        elif key == ord(KEYS.toggle_mask.key):
             self.show_mask = not self.show_mask
             if not self.show_mask:
                 cv2.destroyWindow(MASK_WINDOW)
@@ -67,7 +67,7 @@ class SkinTuner:
             cv2.imshow(MASK_WINDOW, self.detector.last_skin_mask)
         # [MODIFICADO] ayuda incluye la nueva tecla 'w'
         cv2.putText(frame,
-                    f"Click en tu mano para calibrar tono de piel | {HELP_TEXT}",
+                    f"Click para calibrar tono de piel | {HELP_TEXT}",
                     (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         cv2.imshow(WINDOW, frame)
 
@@ -108,13 +108,13 @@ def main():
         tuner.show(frame)
 
         key = cv2.waitKey(1) & 0xFF
-        if key == KEYS.quit.key:
+        if key == ord(KEYS.quit.key):
             break
-        elif key == KEYS.toggle_filter.key:                        # [NUEVO] armar filtro
+        elif key == ord(KEYS.toggle_filter.key):                        # [NUEVO] armar filtro
             filter_manager.arm()
-        elif key == KEYS.toggle_contours.key:
+        elif key == ord(KEYS.toggle_contours.key):
             show_contours = not show_contours
-        elif key == KEYS.clear_filter:
+        elif key == ord(KEYS.clear_filter.key):
             filter_manager.clear()
         else:
             tuner.handle_key(key)                    # 'r' resetea piel, 'm' máscara

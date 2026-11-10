@@ -19,7 +19,7 @@ class KeyBindings:
     reset_skin: KeyBinding = field(default_factory=lambda: KeyBinding("r", "reset sliders"))
     toggle_contours: KeyBinding = field(default_factory=lambda: KeyBinding("c", "contours"))
     toggle_filter: KeyBinding = field(default_factory=lambda: KeyBinding("w", "gesture filter"))
-    reset_filter: KeyBinding = field(default_factory=lambda: KeyBinding("e", "clear filter"))
+    clear_filter: KeyBinding = field(default_factory=lambda: KeyBinding("e", "clear filter"))
 
     def save(self, path: Path = SETTINGS_PATH):
         """Escribe el archivo que el usuario puede editar."""
