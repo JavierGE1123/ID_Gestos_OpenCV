@@ -11,10 +11,18 @@
   },
   "reset_skin": {
     "key": "r",
-    "help": "reset"
+    "help": "reset sliders"
   },
   "toggle_contours": {
     "key": "c",
     "help": "contours"
+  },
+  "toggle_filter": {
+    "key": "w",
+    "help": "gesture filter"
+  },
+  "reset_filter": {
+    "key": "e",
+    "help": "clear filter"
   }
 }
